@@ -1,0 +1,151 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract UberPool {
+    struct Ride {
+        address[] riders;
+        address driver;
+        uint256 fare;
+        string routeDetails;
+        uint256 timestamp;
+        bool completed;
+    }
+
+    struct Review {
+        address reviewer;
+        uint8 rating;
+        string comments;
+        uint256 timestamp;
+    }
+
+    mapping(bytes32 => Ride) public rides;
+    mapping(bytes32 => Review[]) public reviews;
+    mapping(address => uint256) public balances;
+
+    uint256 public rideCount;
+
+    event RideCreated(
+        bytes32 indexed rideId,
+        address driver,
+        address[] riders,
+        uint256 fare,
+        string routeDetails,
+        uint256 timestamp
+    );
+
+    event RideCompleted(bytes32 indexed rideId, uint256 fare);
+
+    event PaymentProcessed(bytes32 indexed rideId, uint256 fare);
+
+    event ReviewSubmitted(
+        bytes32 indexed rideId,
+        address reviewer,
+        uint8 rating,
+        string comments,
+        uint256 timestamp
+    );
+
+    modifier onlyDriver(bytes32 _rideId) {
+        require(rides[_rideId].driver == msg.sender, "Only the driver can perform this action.");
+        _;
+    }
+
+    modifier onlyRider(bytes32 _rideId) {
+        bool isRider = false;
+        for (uint i = 0; i < rides[_rideId].riders.length; i++) {
+            if (rides[_rideId].riders[i] == msg.sender) {
+                isRider = true;
+                break;
+            }
+        }
+        require(isRider, "Only a rider can perform this action.");
+        _;
+    }
+
+    function createRide(
+        address[] memory _riders,
+        uint256 _fare,
+        string memory _routeDetails
+    ) public {
+        bytes32 rideId = keccak256(
+            abi.encodePacked(msg.sender, _fare, _routeDetails, block.timestamp)
+        );
+
+        rides[rideId] = Ride({
+            riders: _riders,
+            driver: msg.sender,
+            fare: _fare,
+            routeDetails: _routeDetails,
+            timestamp: block.timestamp,
+            completed: false
+        });
+
+        rideCount++;
+        emit RideCreated(rideId, msg.sender, _riders, _fare, _routeDetails, block.timestamp);
+    }
+
+    function completeRide(bytes32 _rideId) public onlyDriver(_rideId) {
+        require(!rides[_rideId].completed, "Ride already completed.");
+        rides[_rideId].completed = true;
+        balances[rides[_rideId].driver] += rides[_rideId].fare;
+        emit RideCompleted(_rideId, rides[_rideId].fare);
+    }
+
+    function processPayment(bytes32 _rideId) public {
+        require(rides[_rideId].completed, "Ride not completed.");
+        uint256 farePerRider = rides[_rideId].fare / rides[_rideId].riders.length;
+
+        for (uint i = 0; i < rides[_rideId].riders.length; i++) {
+            balances[rides[_rideId].riders[i]] -= farePerRider;
+            balances[rides[_rideId].driver] += farePerRider;
+        }
+
+        emit PaymentProcessed(_rideId, rides[_rideId].fare);
+    }
+
+    function submitReview(
+        bytes32 _rideId,
+        uint8 _rating,
+        string memory _comments
+    ) public onlyRider(_rideId) {
+        reviews[_rideId].push(Review({
+            reviewer: msg.sender,
+            rating: _rating,
+            comments: _comments,
+            timestamp: block.timestamp
+        }));
+
+        emit ReviewSubmitted(_rideId, msg.sender, _rating, _comments, block.timestamp);
+    }
+
+    function getRideDetails(bytes32 _rideId)
+        public
+        view
+        returns (
+            address driver,
+            address[] memory riders,
+            uint256 fare,
+            string memory routeDetails,
+            uint256 timestamp,
+            bool completed
+        )
+    {
+        Ride memory ride = rides[_rideId];
+        return (
+            ride.driver,
+            ride.riders,
+            ride.fare,
+            ride.routeDetails,
+            ride.timestamp,
+            ride.completed
+        );
+    }
+
+    function getReviews(bytes32 _rideId) public view returns (Review[] memory) {
+        return reviews[_rideId];
+    }
+
+    function getBalance(address _user) public view returns (uint256) {
+        return balances[_user];
+    }
+}
